@@ -1,12 +1,14 @@
 ﻿<#
  .Synopsis
- Eine DSL für einen Assistenten
+ A simple DSL for creating wizards
  .Notes
- Letzte Änderung: 22/4/2016
+ Last Update:4/22/2016
 #>
 
-# Hilfsklasse für das Auffinden von Controls
+Import-LocalizedData -BindingVariable Msg -UICulture "de-DE"
 
+# Helper class for finding controls in the logical tree
+# by their type
 $CSCode = @'
     using System;
     using System.Collections;
@@ -19,7 +21,7 @@ $CSCode = @'
     {
         public class WPFHelper
         {
-            // Holt alle logischen Kindelemente eines bestimmten Typs
+            // Gets all logical child elements of a certain type
             private static List<T> GetLogicalChildCollection<T>(object parent) where T : DependencyObject
             {
                 List<T> logicalCollection = new List<T>();
@@ -44,20 +46,27 @@ $CSCode = @'
                 }
             }
 
-            // Holt alle TextBoxen
+            // Gets all Textboxes
             public static List<TextBox> GetTextboxes(Window w)
             {
                 List<TextBox> textboxList = GetLogicalChildCollection<TextBox>(w);
-                // Console.WriteLine("*** {0} TextBoxen gefunden. ***", textboxList.Count);
+                // Console.WriteLine("*** {0} TextBoxes found. ***", textboxList.Count);
                 return textboxList;
             }
 
-            // Holt alle RadioButtons
+            // Gets all RadioButtons
             public static List<RadioButton> GetRadioButtons(Window w)
             {
                 List<RadioButton> radioButtonList = GetLogicalChildCollection<RadioButton>(w);
-                // Console.WriteLine("*** {0} RadioButtons gefunden. ***", radioButtonList.Count);
+                // Console.WriteLine("*** {0} RadioButtons found. ***", radioButtonList.Count);
                 return radioButtonList;
+            }
+
+            // Gets all Buttons
+            public static List<Button> GetButtons(Window w)
+            {
+                List<Button> buttonList = GetLogicalChildCollection<Button>(w);
+                return buttonList;
             }
 
         }
@@ -65,25 +74,26 @@ $CSCode = @'
 
 '@
 
+# Add the custom type into the current PowerShell session
 Add-Type -TypeDefinition $CSCode -Language CSharp `
  -ReferencedAssemblies PresentationCore, PresentationFramework, WindowsBase, System.Xaml
 
 <#
  .Synopsis
- Legt einen Assistenten an
+ Creates an assistant
  .Parameter Title
- Die Überschrift
+ The title of the main window
  .Parameter ScriptBlock
- Enthält die Elemente des Assistenten
+ Contains all the window elements
  .Parameter Width
- Die Breite des Fensters
+ Window width
  .Parameter Height
- Die Höhe des Fensters
+ Window height
 #>
 function Assistant
 {
-    param([Parameter(Position=1)][String]$Title,
-          [Parameter(Position=2)][Scriptblock]$Scriptblock,
+    param([Parameter(Mandatory=$true, Position=1)][String]$Title,
+          [Parameter(Mandatory=$true, Position=2)][Scriptblock]$Scriptblock,
           [Parameter(Position=3)][Int]$Width = 800,
           [Parameter(Position=4)][Int]$Height = 600)
 
@@ -95,7 +105,7 @@ function Assistant
     $Script:ErrorFlag = $false
     $Script:SBOKButtonAction = $null
     $Script:WizardVariables = @()
-    $Script:LogoPfad = (Join-Path -Path $PSScriptRoot -ChildPath "PowerShellLogo.png")
+    $Script:LogoPfad = (Join-Path -Path $PSScriptRoot -ChildPath "PoshwizardLogo.png")
 
     $xaml = "<Window "
     $xaml += "x:Name='MainWindow' "
@@ -116,6 +126,7 @@ function Assistant
     $xaml += "</Window>"
     # $xaml
 
+    # Executes when a Next button is clicked
     $SBNextButton = {
         param($Sender, $EventArgs)
         # [System.Windows.MessageBox]::Show($CurrentTabIndex)
@@ -125,6 +136,7 @@ function Assistant
         $Script:CurrentTabIndex = $TabIndex
     }
 
+    # Executes when a Back button is clicked
     $SBBackButton = {
         param($Sender, $EventArgs)
         [void]($Sender.Name -match "\w+(\d+)")
@@ -134,38 +146,57 @@ function Assistant
         $Script:CurrentTabIndex = $TabIndex
     }
 
+    # Executes when a Tab page had been selected
     $SBTabSelectionChanged = {
         param($Sender, $EventArgs)
-        $SB = {
-             [System.Windows.MessageBox]::Show($Sender.SelectedItem.Header)
-        }
         $Script:CurrentTabIndex = $Sender.SelectedIndex
-        # Anzeigen einer MessageBox nicht so ohne weiteres möglich,
-        # da sie die Nachrichtenverarbeitung blockiert?
-        # $MainWin.Dispatcher.Invoke([Action]$SB, "Normal")
     }
 
+    # Executes when the content of a Textbox changes
     $SBTextBoxChanged = {
-        # Aktuellen Wert der Textbox in gleichnamige Variable eintragen
+        # Put the current value of the Textbox into the variable with the same name
         param($Sender, $EventArgs)
         $TBName = $Sender.Name
         Set-Variable -Name $TBName -Value $Sender.Text -Scope "Global"
     }
 
+    # Executes when a Radio Button had been selected
     $SBSelectedChanged = {
         param($Sender, $EventArgs)
-        # Text des selektierten RadioButtons in die entsprechende Variable schreiben
-        # Die Ziffer(n) am Ende abtrennen
+        # Put the text of the selected RadioButton into the variable with the same name
+        # split the numbers and the end of the name
         [void]($Sender.Name -match "^([a-z]+)(\d+)")
         $RadioName = $Matches[1]
         Set-Variable -Name $RadioName -Value $Sender.Content -Scope "Global"
     }
- 
+
+    # Executes when a file choose-Button is clicked
+    $SBFileChoose = {
+        param($Sender, $EventArgs)
+        $OpenFileDlg = New-Object -TypeName Microsoft.Win32.OpenFileDialog
+        $OpenFileDlg.InitialDirectory = "$env:userprofile\Documents"
+        $OpenFileDlg.Filter = "All Files (*.*)|*.*"
+        if ($OpenFileDlg.ShowDialog())
+        {
+          $VarName = ($Sender.Name -split "_File")[0]
+          Set-Variable -Name $VarName -Value $OpenFileDlg.FileName
+          # Aktualisieren der entsprechenden TextBox
+          $tb = $MainWin.FindName($VarName)
+          if ($tb -ne $null)
+          {
+            $tb.Text = $OpenFileDlg.FileName
+          }
+        }
+    }
+
+    # Creates main window from xaml 
     $MainWin= [System.Windows.Markup.XamlReader]::Parse($Xaml)
-    $TabControl = $MainWin.FindName("MainTabControl")
+
+    # Setup the event handler for the TabControl
+    $Script:TabControl = $MainWin.FindName("MainTabControl")
     $TabControl.add_SelectionChanged($SBTabSelectionChanged)
 
-    # Alle NextButtons finden
+    # Setup event handlers for all Next Buttons
     $i = 1
     while($true)
     {
@@ -177,7 +208,7 @@ function Assistant
       $btn.Add_Click($SBNextButton)
     }
 
-    # Alle BackButtons finden
+    # Setup event handlers for all Back buttons
     $i = 1
     while($true)
     {
@@ -189,33 +220,41 @@ function Assistant
       $btn.Add_Click($SBBackButton)
     }
 
-    # Alle TextBoxen mit ChangedEvent-Handler belegen
+    # Setup ChangedEvent handlers for all TextBoxes
     $TextboxListe = [Poshwizard.WPFHelper]::GetTextboxes($MainWin)
     foreach($Tb in $TextboxListe)
     {
         $Tb.add_TextChanged($SBTextBoxChanged)
     }
 
-    # Alle RadionButtons mit CheckedEvent-Handlern belegen
+    # Setup CheckedEvent handlers for all RadioButtons
     $RadioButtonListe = [Poshwizard.WPFHelper]::GetRadioButtons($MainWin)
     foreach($Rb in $RadioButtonListe)
     {
         $Rb.add_Checked($SBSelectedChanged)
     }
 
- 
-    # OKButton-Action festlegen
+    # Setup event handlers for all FileChoose-Buttons
+    $FileChooseButtons =  [Poshwizard.WPFHelper]::GetButtons($MainWin) | Where Name -like "*_File*"
+    foreach($Btn in $FileChooseButtons)
+    {
+
+        $Btn.add_Click($SBFileChoose)
+    }
+
+    # Setup action for the OKButton
     $OKButton = $MainWin.FindName("OKButton")
 
-    # Gibt es einen OK-Button?
+    # Is a OKButton already there?
     if ($OKButton -eq $null)
     {
         $Script:ErrorFlag = $true
-        Write-Error "Assistent muss mit OKButton-Element beendet werden."
+        Write-Error $msg.ErrorMsg2
     }
 
     $OKButton.add_click($Script:SBOKButtonAction)
 
+    # Additional Action for the Close window parameter
     $SBClose = {
         if ($Script:CloseWindow)
         {
@@ -225,16 +264,17 @@ function Assistant
 
     $OKButton.add_click($SBClose)
 
+    # Any errors?
     if (!$Script:ErrorFlag)
     {
         [void]$MainWin.ShowDialog()
     }
     else
     {
-        Write-Warning "*** Bitte erst die angezeigten Fehler beheben ***"
+        Write-Warning $msg.ErrorMsg1
     }
 
-    # Alle angelegten Variablen wieder löschen
+    # Delete all variables created by the Module
     foreach($v in $Script:WizardVariables)
     {
         rm variable:"$($v.Name)"
@@ -246,46 +286,58 @@ function Assistant
  .Synopsis
  Legt ein einzelnes Fenster an
  .Parameter Title
- Die Überschrift
+ The Window title
  .Parameter Description
- Überschrift für den Fensterinhalt
+ A description that is display on top of the Window display area
  .Parameter ScriptBlock
- Enthält die Elemente des Fensters
+ Contains all the Window elements
 #>
 function Window
 {
-    param([ValidateNotNull()][Parameter(Position=0)][String]$Title,
-          [ValidateNotNull()][String]$Description,
+    param([ValidateNotNull()][Parameter(Mandatory=$true, Position=0)][String]$Title,
+          [ValidateNotNull()][Parameter(Position=2)][String]$Description,
           [ValidateNotNull()][Parameter(Position=1)][Scriptblock]$ScriptBlock)
 
-    # Feststellen, ob es Teil von Assistant ist
     if ((Get-PSCallStack)[2].Command -ne "Assistant")
     {
         $Script:ErrorFlag = $true
-        throw "Window muss Teil von Assistant sein"
+        throw $Msg.ErrorMsg3
     }
 
+    $HeaderWidth = $Title.Length * 10 - 20;
+    
     $xaml = "<TabItem> "
     $xaml += "<TabItem.Header> "
-    $xaml += "<TextBlock Text='$Title' Width='100' Margin='4' /> "
+    $xaml += "<TextBlock Text='$Title' Width='$HeaderWidth' Margin='4' /> "
     $xaml += "</TabItem.Header> "
-    $xaml += "<DockPanel "
-    $xaml += " HorizontalAlignment='Stretch' "
-    $xaml += ">"
     $xaml += "<Grid "
-    $Xaml += "DockPanel.Dock='Top' "
+    $xaml += "HorizontalAlignment='Stretch' "
+    $xaml += "VerticalAlignment='Top' "
     $xaml += ">"
     $xaml += "<Grid.ColumnDefinitions> "
     $xaml += "<ColumnDefinition Width='2*' /> "
     $xaml += "<ColumnDefinition Width='8*' /> "
     $xaml += "</Grid.ColumnDefinitions> "
+    $xaml += "<Grid.RowDefinitions> "
+    $xaml += "<RowDefinition Height='200' />"
+    $xaml += "<RowDefinition Height='1*' /> "
+    $xaml += "</Grid.RowDefinitions>"
+    $xaml += "<Grid "
+    $xaml += "Grid.Row='0' "
+    $xaml += "Grid.Column='0' "
+    $xaml += "Grid.ColumnSpan='2' "
+    $xaml += ">"
+    $xaml += "<Grid.ColumnDefinitions>"
+    $xaml += "<ColumnDefinition Width='1*' />"
+    $xaml += "<ColumnDefinition Width='5*' />"
+    $xaml += "</Grid.ColumnDefinitions>"
     $xaml += "<Image "
-    $Xaml += "DockPanel.Dock='Top' "
     $xaml += "Grid.Column='0' "
     $xaml += "Source='$LogoPfad' "
-    $xaml += "Height='80' "
+    $xaml += "Height='Auto' "
     $xaml += "Width='Auto' "
     $xaml += "Margin='4' "
+    $xaml += "Stretch='Fill' "
     $xaml += "/>"
     $xaml += "<TextBlock "
     $xaml += "Grid.Column='1' "
@@ -298,30 +350,34 @@ function Window
     $xaml += "Background='LightBlue' "
     $xaml += "Text='$Description' "
     $xaml += "/>"
-    $xaml += "</Grid> "
+    $xaml += "</Grid>"
+    $xaml += "<StackPanel "
+    $xaml += "Grid.Row='1' "
+    $xaml += "Grid.Column='1' "
+    $xaml += ">"
     $xaml += $ScriptBlock.Invoke()
-    $xaml += "</DockPanel>"
+    $xaml += "</StackPanel>"
+    $xaml += "</Grid>"
     $xaml += "</TabItem>"
     $xaml
 }
 
 <#
  .Synopsis
- Legt eine Kopfzeile für ein Fenster fest
+ Inserts a head label with a big font size
  .Parameter Title
- Der Inhalt
+ The content of the label
 #>
 function HeadLabel
 {
     param([String]$Title)
-    # Feststellen, ob HeadLabel ein Teil von Window ist
+    # Check if the HeadLabel element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "HeadLabel muss Teil von Window sein"
+        throw $Msg.ErrorMsg4
     }
     $Xaml = "<TextBlock "
-    $Xaml += "DockPanel.Dock='Top' "
     $Xaml += "Height='48' "
     $Xaml += "Width='Auto' "
     $Xaml += "FontSize='20' "
@@ -337,19 +393,19 @@ function HeadLabel
 
 <#
  .Synopsis
- Fügt einen Weiter-Button ein
+ Inserts a Next button
 #>
 function NextButton
 {
-    # Feststellen, ob der NextButton Teil von Window ist
+    # Check if the Button element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "NextButton muss Teil von Window sein"
+        throw $Msg.ErrorMsg5
     }
     $Xaml = "<Button "
     $Xaml += "x:Name='NextButton$NextButtonCount' "
-    $Xaml += "DockPanel.Dock='Right' "
+    $Xaml += "HorizontalAlignment='Left' "
     $Xaml += "Width='200' "
     $Xaml += "Height='32' "
     $Xaml += "Margin='4' "
@@ -361,23 +417,22 @@ function NextButton
 
 <#
  .Synopsis
- Fügt einen Zurück-Button ein
+ Inserts a Back button
 #>
 function BackButton
 {
-    # Feststellen, ob der BackButton Teil von Window ist
+    # Check if the Button element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "BackButton muss Teil von Window sein"
+        throw $Msg.ErrorMsg6
     }
     $Xaml = "<Button "
     $Xaml += "x:Name='BackButton$BackButtonCount' "
-    $Xaml += "DockPanel.Dock='Left' "
     $Xaml += "Width='200' "
     $Xaml += "Height='32' "
     $Xaml += "Margin='80,4' "
-    $Xaml += "HorizontalAlignment='Center' "
+    $Xaml += "HorizontalAlignment='Left' "
     $Xaml += "Content='_Zurück' "
     $Xaml += "/>"
     $Script:BackButtonCount++
@@ -386,111 +441,127 @@ function BackButton
 
 <#
  .Synopsis
- Fügt Textfeld für die Eingabe ein
+ Inserts a Textbox for text input
  .Parameter Name
- Der Name, über den der Inhalt angesprochen wird
+ Name of the variable that contains the input
 #>
-
 function Textbox
 {
-    param([ValidateNotNullOrEmpty()][String]$Name)
+    param([ValidateNotNullOrEmpty()]
+          [Parameter(Mandatory=$true)][String]$Name,
+          [Switch]$ChooseFile)
 
-    # Feststellen, ob TextBox Teil von Window ist
+    # Check if the TextBox element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "TextBox muss Teil von Window sein"
+        throw $Msg.ErrorMsg7
     }
 
-    # Variable für den Namen anlegen
+    # Create a variable with the given name
 
-    # Gibt es Variable bereits?
+    # Does the variable alreay exists?
     if (Get-Variable -Name $Name -ErrorAction SilentlyContinue)
     {
         $Script:ErrorFlag = $true
-        Write-Error "$Name für TextBox-Element bereits vergeben."
+        Write-Error ($Msg.ErrorMsg8 -f $Name)
     }
 
     $v = New-Variable -Name $Name -Scope "Global" -PassThru
     $Script:WizardVariables += $v
 
-    $Xaml = "<TextBox "
+    $Xaml = "<StackPanel "
+    $Xaml += "Orientation='Horizontal' "
+    $Xaml += "HorizontalAlignment='Left' "
+    $Xaml += ">"
+    $Xaml += "<TextBox "
     $Xaml += "x:Name='$Name' "
-    $Xaml += "DockPanel.Dock='Top' "
     $Xaml += "Width='400' "
     $Xaml += "Height='32' "
-    $Xaml += "Margin='8' "
+    $Xaml += "Margin='4' "
     $Xaml += "/>" 
+
+    if ($ChooseFile)
+    {
+        $FileChooseButtonName = "$Name`_File"
+
+        $Xaml += "<Button "
+        $Xaml += "Name='$FileChooseButtonName' "
+        $Xaml += "Width='40' Margin='4' "
+        $Xaml += "Content='...' "
+        $Xaml += "/>"
+    }
+    $Xaml += "</StackPanel>"
     $Xaml
 
 }
 
 <#
  .Synopsis
- Fügt ein Bezeichnungsfeld ein
+ Inserts a label
  .Parameter Text
- Der Inhalt des Bezeichnungsfeldes
+ The content of the label
 #>
 function Label
 {
-    param([Parameter(Position=1)][String]$Text,
+    param([Parameter(Mandatory=$true, Position=1)][String]$Text,
           [Parameter(Position=2)][Int]$Width=400)
 
-    # Feststellen, ob das Label Teil von Window ist
+    # Check if the label element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "Label muss Teil von Window sein"
+        throw $Msg.ErrorMsg9
     }
     $Xaml = "<Label "
-    $Xaml += "DockPanel.Dock='Top' "
     $Xaml += "Background='LightGray' "
-    $Xaml += "FontSize='14' "
+    $Xaml += "HorizontalAlignment='Left' "
+    $Xaml += "FontSize='16' "
+    $Xaml += "Height='30' "
     $Xaml += "Width='$Width' "
-    $Xaml += "Margin='8' "
+    $Xaml += "Margin='4' "
     $Xaml += "Content='$Text' /> "
     $Xaml
-
 }
 
 <#
  .Synopsis
- Fügt eine Auswahl ein
+ Adds a multiple choice
  .Parameter Choices
- Die Auswahlpunkte als Texte
+ Each option as a string
  .Parameter Name
- Der Name, über den die Auswahl angesprochen wird
+ Name of the variable that contains the selected element
 #>
 function Choice
 {
-    param([Parameter(Position=1)][String[]]$Choices, 
-          [Parameter(Position=2)][String]$Name)
+    param([Parameter(Mandatory=$true, Position=1)][String[]]$Choices, 
+          [Parameter(Mandatory=$true, Position=2)][String]$Name)
 
-    # Feststellen, ob das Choice-Element Teil von Window ist
+    # Check if the choice element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "Choice muss Teil von Window sein"
+        throw $Msg.ErrorMsg10
     }
 
-    # Gibt es Variable bereits?
+    # Does variable exists?
     if (Get-Variable -Name $Name -ErrorAction SilentlyContinue)
     {
         $Script:ErrorFlag = $true
-        Write-Error "$Name für Choice-Element bereits vergeben."
+        Write-Error ($Err.ErrorMsg11 -f $Name)
     }
 
-    # Variable wird mit dem ersten Choice-Element vorbelegt
-    # Wird kein RadioButton selektiert, wäre die Variable ansonsten leer
+    # Variable will be pre set with first Choice Element
+    # Necessary because otherwise the variable would be empty if no RadioButton will be selected
     $v = New-Variable -Name $Name -Scope "Global" -Value @($Choices[0]) -PassThru
     $Script:WizardVariables += $v
 
-    # Für alle Choice-Elemente RadioButtons einfügen
+    # Add RadioButtons for each choice element
     $Xaml = "<GroupBox "
-    $Xaml += "DockPanel.Dock='Top' "
+    $Xaml += "HorizontalAlignment='Left' "
+    $Xaml += "VerticalContentAlignment='Stretch' "
     $Xaml += "Header='Mehrfachauswahl' "
     $Xaml += "Margin='4' "
-    $Xaml += "VerticalContentAlignment='Stretch' "
     $Xaml += "Height='Auto' >"
     $Xaml += "<StackPanel> "
    
@@ -516,44 +587,43 @@ function Choice
 
 <#
  .Synopsis
- Fügt einen OK-Button zum Abschluss ein
+ Inserts an OKButton for the Action
  .Parameter Action
- Die Befehle, die zum Abschluss ausgeführt werden sollen
+ Scriptblock that the wizard should execute
  .Parameter Title
- Die Beschriftung
+ Caption of the button
  .Parameter CloseWindow
- Bestimmt, ob das Fenster geschlossen wird
+ true if the button should close the window
 #>
 function OKButton
 {
-    param([Parameter(Position=1)][ValidateNotNull()][ScriptBlock]$Action, 
+    param([Parameter(Mandatory=$true, Position=1)][ValidateNotNull()][ScriptBlock]$Action, 
           [Parameter(Position=2)][String]$Title="OK",
           [Parameter(Position=3)][Switch]$CloseWindow)
 
-    # Es darf nur einen OKButton geben
+    # Only one OKButton allowed
     if ($Script:OKButtonCount -gt 1)
     {
         $Script:ErrorFlag = $true
-        throw "OKButton darf nur einmal verwendet werden."
+        throw $Msg.ErrorMsg12
     }
 
     $Script:OKButtonCount++
 
-    # Feststellen, ob der OKButton Teil von Window ist
+    # Check if the OKButton part of the Window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
     {
         $Script:ErrorFlag = $true
-        throw "OKButton muss Teil von Window sein"
+        throw $Msg.ErrorMsg13
     }
 
-    # Action speichern
+    # Save action in variable
     $Script:SBOKButtonAction = $Action
 
     $Script:CloseWindow = $PSBoundParameters.ContainsKey("CloseWindow")
 
     $Xaml = "<Button "
     $Xaml += "x:Name='OKButton' "
-    $Xaml += "DockPanel.Dock='Bottom' "
     $Xaml += "Height='32' "
     $Xaml += "Width='160' "
     $Xaml += "Margin='8' "
