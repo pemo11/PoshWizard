@@ -5,7 +5,7 @@
  Last Update:4/22/2016
 #>
 
-Import-LocalizedData -BindingVariable Msg -UICulture "de-DE"
+Import-LocalizedData -BindingVariable Msg -UICulture "en-US"
 
 # Helper class for finding controls in the logical tree
 # by their type
