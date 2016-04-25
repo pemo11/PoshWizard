@@ -2,7 +2,7 @@
  .Synopsis
  A simple DSL for creating wizards
  .Notes
- Last Update:4/22/2016
+ Last Update:4/25/2016
 #>
 
 Import-LocalizedData -BindingVariable Msg -UICulture "en-US"
@@ -68,7 +68,6 @@ $CSCode = @'
                 List<Button> buttonList = GetLogicalChildCollection<Button>(w);
                 return buttonList;
             }
-
         }
     }
 
@@ -189,8 +188,32 @@ function Assistant
         }
     }
 
+    # Executes when a file choose-Button is clicked
+    $SBFolderChoose = {
+        param($Sender, $EventArgs)
+        $BrowserFolderDlg = New-Object -TypeName Ookii.Dialogs.Wpf.VistaFolderBrowserDialog
+        $BrowserFolderDlg.ShowNewFolderButton = $true
+        if ($BrowserFolderDlg.ShowDialog())
+        {
+          $VarName = ($Sender.Name -split "_Folder")[0]
+          Set-Variable -Name $VarName -Value $BrowserFolderDlg.SelectedPath
+          # Aktualisieren der entsprechenden TextBox
+          $tb = $MainWin.FindName($VarName)
+          if ($tb -ne $null)
+          {
+            $tb.Text = $BrowserFolderDlg.SelectedPath
+          }
+        }
+    }
+
+    # Execute when the MainWindow closed
+    $SBMainWinClosed = {
+        # [System.Environment]::Exit(0)
+    }
+
     # Creates main window from xaml 
     $MainWin= [System.Windows.Markup.XamlReader]::Parse($Xaml)
+    $MainWin.add_Closed($SBMainWinClosed)
 
     # Setup the event handler for the TabControl
     $Script:TabControl = $MainWin.FindName("MainTabControl")
@@ -240,6 +263,14 @@ function Assistant
     {
 
         $Btn.add_Click($SBFileChoose)
+    }
+
+    # Setup event handlers for all FolderChoose-Buttons
+    $FolderChooseButtons =  [Poshwizard.WPFHelper]::GetButtons($MainWin) | Where Name -like "*_Folder*"
+    foreach($Btn in $FolderChooseButtons)
+    {
+
+        $Btn.add_Click($SBFolderChoose)
     }
 
     # Setup action for the OKButton
@@ -319,7 +350,7 @@ function Window
     $xaml += "<ColumnDefinition Width='8*' /> "
     $xaml += "</Grid.ColumnDefinitions> "
     $xaml += "<Grid.RowDefinitions> "
-    $xaml += "<RowDefinition Height='200' />"
+    $xaml += "<RowDefinition Height='100' />"
     $xaml += "<RowDefinition Height='1*' /> "
     $xaml += "</Grid.RowDefinitions>"
     $xaml += "<Grid "
@@ -333,19 +364,20 @@ function Window
     $xaml += "</Grid.ColumnDefinitions>"
     $xaml += "<Image "
     $xaml += "Grid.Column='0' "
+    $xaml += "Grid.Row='0' "
     $xaml += "Source='$LogoPfad' "
     $xaml += "Height='Auto' "
     $xaml += "Width='Auto' "
     $xaml += "Margin='4' "
-    $xaml += "Stretch='Fill' "
     $xaml += "/>"
     $xaml += "<TextBlock "
     $xaml += "Grid.Column='1' "
-    $xaml += "Height='80' "
+    $xaml += "Grid.Row='0' "
+    $xaml += "Height='Auto' "
     $xaml += "Width='Auto' "
+    $xaml += "Margin='4,4,4,12' "
     $xaml += "FontFamily='Verdana' "
     $xaml += "FontSize='24' "
-    $xaml += "Margin='4' "
     $xaml += "Padding='4' "
     $xaml += "Background='LightBlue' "
     $xaml += "Text='$Description' "
@@ -406,8 +438,8 @@ function NextButton
     $Xaml = "<Button "
     $Xaml += "x:Name='NextButton$NextButtonCount' "
     $Xaml += "HorizontalAlignment='Left' "
-    $Xaml += "Width='200' "
-    $Xaml += "Height='32' "
+    $Xaml += "Width='240' "
+    $Xaml += "Height='40' "
     $Xaml += "Margin='4' "
     $Xaml += "Content='_Weiter' "
     $Xaml += "/>"
@@ -429,8 +461,8 @@ function BackButton
     }
     $Xaml = "<Button "
     $Xaml += "x:Name='BackButton$BackButtonCount' "
-    $Xaml += "Width='200' "
-    $Xaml += "Height='32' "
+    $Xaml += "Width='240' "
+    $Xaml += "Height='40' "
     $Xaml += "Margin='80,4' "
     $Xaml += "HorizontalAlignment='Left' "
     $Xaml += "Content='_Zurück' "
@@ -447,9 +479,12 @@ function BackButton
 #>
 function Textbox
 {
+    [CmdletBinding(DefaultParametersetName="Default")]
     param([ValidateNotNullOrEmpty()]
           [Parameter(Mandatory=$true)][String]$Name,
-          [Switch]$ChooseFile)
+          [Parameter(ParametersetName="File")][Switch]$ChooseFile,
+          [Parameter(ParametersetName="Folder")][Switch]$ChooseFolder
+          )
 
     # Check if the TextBox element is part of the window element
     if ((Get-PSCallStack)[2].Command -ne "Window")
@@ -470,13 +505,15 @@ function Textbox
     $v = New-Variable -Name $Name -Scope "Global" -PassThru
     $Script:WizardVariables += $v
 
-    $Xaml = "<StackPanel "
-    $Xaml += "Orientation='Horizontal' "
-    $Xaml += "HorizontalAlignment='Left' "
-    $Xaml += ">"
+    $Xaml = "<Grid> "
+    $Xaml += "<Grid.ColumnDefinitions> "
+    $Xaml += "<ColumnDefinition Width='*' />"
+    $Xaml += "<ColumnDefinition Width='48' />"
+    $Xaml += "</Grid.ColumnDefinitions> "
     $Xaml += "<TextBox "
     $Xaml += "x:Name='$Name' "
-    $Xaml += "Width='400' "
+    $Xaml += "Grid.Column='0' "
+    $Xaml += "Width='Auto' "
     $Xaml += "Height='32' "
     $Xaml += "Margin='4' "
     $Xaml += "/>" 
@@ -487,11 +524,27 @@ function Textbox
 
         $Xaml += "<Button "
         $Xaml += "Name='$FileChooseButtonName' "
-        $Xaml += "Width='40' Margin='4' "
+        $Xaml += "Grid.Column='1' "
+        $Xaml += "Width='Auto' "
+        $Xaml += "Height='Auto' "
+        $Xaml += "Margin='4' "
+        $Xaml += "Content='...' "
+        $Xaml += "/>"}
+
+    if ($ChooseFolder)
+    {
+        $FolderChooseButtonName = "$Name`_Folder"
+
+        $Xaml += "<Button "
+        $Xaml += "Name='$FolderChooseButtonName' "
+        $Xaml += "Grid.Column='1' "
+        $Xaml += "Width='40' "
+        $Xaml += "Height='Auto' "
+        $Xaml += "Margin='4' "
         $Xaml += "Content='...' "
         $Xaml += "/>"
     }
-    $Xaml += "</StackPanel>"
+    $Xaml += "</Grid>"
     $Xaml
 
 }
@@ -624,7 +677,7 @@ function OKButton
 
     $Xaml = "<Button "
     $Xaml += "x:Name='OKButton' "
-    $Xaml += "Height='32' "
+    $Xaml += "Height='40' "
     $Xaml += "Width='160' "
     $Xaml += "Margin='8' "
     $Xaml += "Content='$Title' /> "
